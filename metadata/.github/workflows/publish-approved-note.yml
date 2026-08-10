@@ -1,1 +1,83 @@
+name: Publish Approved Notes
 
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+
+  publish:
+
+    if: github.event.pull_request.merged == true
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Find PDF
+        id: find_pdf
+        run: |
+
+          PDF_FILE=$(git diff-tree \
+            --no-commit-id \
+            --name-only \
+            -r \
+            "${{ github.event.pull_request.merge_commit_sha }}" \
+            | grep '^notes/pending/.*\.pdf$' \
+            | head -n 1)
+
+          if [ -z "$PDF_FILE" ]; then
+            echo "PDF not found"
+            exit 1
+          fi
+
+          echo "pdf_file=$PDF_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Find Metadata
+        id: find_metadata
+        run: |
+
+          METADATA_FILE=$(git diff-tree \
+            --no-commit-id \
+            --name-only \
+            -r \
+            "${{ github.event.pull_request.merge_commit_sha }}" \
+            | grep '^metadata/.*\.json$' \
+            | head -n 1)
+
+          if [ -z "$METADATA_FILE" ]; then
+            echo "Metadata not found"
+            exit 1
+          fi
+
+          echo "metadata_file=$METADATA_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Send to PythonAnywhere
+        env:
+          PUBLISH_URL: ${{ secrets.PYTHONANYWHERE_PUBLISH_URL }}
+          PUBLISH_SECRET: ${{ secrets.PYTHONANYWHERE_PUBLISH_SECRET }}
+          PDF_FILE: ${{ steps.find_pdf.outputs.pdf_file }}
+          METADATA_FILE: ${{ steps.find_metadata.outputs.metadata_file }}
+
+        run: |
+
+          curl \
+            --fail \
+            --show-error \
+            --location \
+            --request POST \
+            "$PUBLISH_URL" \
+            --header "Authorization: Bearer $PUBLISH_SECRET" \
+            --form "pdf=@$PDF_FILE" \
+            --form "metadata=@$METADATA_FILE"
